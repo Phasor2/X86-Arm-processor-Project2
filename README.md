@@ -3,7 +3,7 @@ Full report ECE372 Project2 2018.docx and code "* .txt"
 # Part1 SETUP I2C
 ## Initialization for I2C
 To map the I2C, I have to know the pins available to the Beagle Bones Black P9 and P8 connector by changing the MUX that select the signal go to the pads.
- 
+ ![alt-text](https://github.com/Phasor2/Assembly-langguge-X86-Arm-processor-ECE372--Project2/blob/master/MUX.png)
 The I2C that is needed for this project is I2C1_SDA_MUX3, and I2C1_SCL_MUX3. The default of the MUX when initialized it will begin in MODE0. Essentially in the manual ARM355x, the register name that use to map will be named in MODE0. So all we need to look up spi0_d1, spi0_cs0 change to mode 2.
 After mapping and started the I2C clock at CM_PER_I2C1_CLKCTRL, next step is setting the module clock for I2C to communicate with LCD screen. First of all, is setting Prescaler value I2C_PSC offset 0xB0. Initially, value default for Prescaler is 48MHz, the value that we write to the register will be divider for the Prescaler. In this case, we want a 12 MHz for our I2C so 48/4=12 MHz. We will write 0x3 to register. 
 Next setting data rate, we want 100kbps by writing value for SCLH and SCLL. Here we need some calculation
