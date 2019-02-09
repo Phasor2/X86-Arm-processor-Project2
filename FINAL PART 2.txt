@@ -1,0 +1,337 @@
+  @Phong Nguyen
+@ECE 372
+@project 1
+@UART Initialization and RC8600 Talker
+@Setting up STACK
+.text
+.global _start
+.global INT_DIRECTOR
+_start:
+	LDR R13,=STACK1 			@Point to base of STACK for SVC mode
+	ADD R13, R13, #0x1000 		@point to top of the STACK
+	CPS #0x12
+	LDR R13,=STACK2				@Point to base of STACK for IRQ mode
+	ADD R13, R13, #0x1000 		@Point to top of the STACK
+	CPS #0x13					@Back to SVC mode
+@===========================================================================
+@===========================================================================
+@ Turn on GPIO1 CLCK
+	MOV R0,#0x02				@value to turn on GPIO1_CLK 
+	LDR R1,=0x44E000AC			@Load the address for the CM_PER_GPIO1_CLKCTRL
+	STR R0,[R1]					@ Write value to the register
+@BUTTON SETUP using GPIO1 pin 30 for input button falling edge detect 
+@also enable its IRQ
+@ Detect falling edge on GPIO1_30
+	LDR R0,=0x4804C000			@base address for GPIO1 register
+	ADD R1,R0,#0x14C			@R1 is is GPIO1_FALLINGDETECT register
+	MOV R2,#0x40000000			@Load value pin GPIO1_30 push button
+	LDR R3,[R1]					@Load current value of GPIO1_FALLINGDETECT register
+	ORR R3,R3,R2				@Modify the pin GPIO_30 push button
+	STR R3, [R1]				@Store GPIO_30 push button for GPIO1_FALLINGDETECT
+@ GPIO1_IRQSTATUS  on pin 30 R2 0x40000000 sending interrupts to POINTPEND1
+	ADD R1,R0,#0x34				@R1 address of GPIO1_IRQSTATUS_SET_0 register
+	STR R2,[R1]					@Store pin 30 for GPIO1_IRQSTATUS_SET_0
+@ Initialize INTC Interrupts Controller
+	LDR R1,=0x48200000			@R1 loading base address for interrupts controller
+	MOV R2,#0x2				@Value to reset the INTC_CONFIG register
+	STR R2,[R1,#0x10]			@write value to reset the INTC CONFIG
+	MOV R2,#0x04				@ Value to unmask GPIOINTA , pin 2 INTC INT #98
+	STR R2,[R1,#0xE8]			@Write value to INTC_MIR_CLEAR3 register
+	MOV R2,#0x80				@Value to unmask I2C1INT pin 7 INTC INT #71
+	STR R2,[R1,#0xC8]			@Write value to INTC_MIR_CLEAR2 register
+	
+
+@===================================================================================
+@===================================================================================
+@===================================================================================
+@Setting up the I2C1
+@------------------------------
+@Control module base address L4_WKUP 0x44E10000
+@Setting up MUX for I2C1_SDA
+@mode 2: 0010 . AND bit 3,2,0 to 0 and OR bit 1
+	LDR R0,=0x44E10958				@Address of conf_spi0_d1
+	MOV R2,#0x6A 					@mode 2 disable Pullup/Pulldown, Rx enable, Slow slew
+	STR R2, [R0]					@store back for register spi0_sclk switching 
+@Setting up MUX for I2C1_SCL
+	LDR R0,=0x44E1095C 				@Address of conf_spi0_cs0
+	MOV R2,#0x6A 					@mode 2 disable Pullup/Pulldown, Rx enable, Slow slew
+	STR R2, [R0]					@store back for register spi0_sclk switching 
+@Setting up MUX for I2C1_SCL
+@------------------------------
+@Clock for I2C1 base address CM_PER 0x44E00000
+	LDR R0,=0x44E00048				@Address for CM_PER_I2C1_CLKCTRL
+	MOV R2,#0x2					@Value to start the clock
+	STR R2,[R0]					@Store value to turn the clock on
+@-------------------------------
+@Seting Debug Subsystem I2C_SYSTEST
+	LDR R0,=0x44E000BC				@Address for I2C_SYSTEST
+	LDR R2,[R0]					@Load Value from register
+	AND R2,R2,#0xFFFFBFFF				@Value to clear bit 14 for free debug
+	STR R2,[R0]					@Store back to register
+@-----------------------------------
+@Disable I2C module 
+	LDR R0,=0x44E000A4				@Address for I2C_CON
+	LDR R2,[R0]					@Load value in address
+	LDR R4,=0xFFFF7FFF				@Value to clear bit 15
+	BIC R2,R4					@Clear bit 15
+	STR R2,[R0]					@Store back in register
+@---------------------------------------
+@Reset I2C module
+	LDR R0,=0x44E00010				@Address for I2C_SYSC
+	MOV R2,#0x2					@Value to reset
+	STR R2,[R0]					@Store value in register
+
+@----------------------------------------------
+@Disable AUTOIDLE in I2C_SYSC and do a software reset
+	LDR	R0, =0x4802A010				@ Address for I2C_SYSC
+	MOV R2,#0x02
+	STR R2,[R0]					@Store value back to register
+@------------------------------
+@Prescaler value setting up module clock
+@initial value of Prescaler 48 MHZ divine by 4 to get 12 MHZ
+	LDR R0,=0x4802A0B0				@Address of I2C_PSC
+	MOV R2,#0x3					@Setting value divine by 4
+	STR R2,[R0]					@Store value divine by 4
+@------------------------------
+@Setup Low time register SCLL. Base address I2C1: 0x4802A000
+	LDR R0,=0x4802A0B4				@address for I2C_SCLL
+	MOV R2,#0x35					@Value 53 in Dec for SCLL
+	STR R2,[R0]					@Store value 53 into register
+@Setup High time register SCLH. Base address I2C1: 0x4802A000
+	LDR R0,=0x4802A0B8				@address for I2C_SCLH
+	MOV R2,#0x37					@value 55 in Dec for SCLH
+	STR R2,[R0]					@Store value 55 into register
+@--------------------------------
+@Setup Own address I2C_0A.
+@Make sure clearing bit 9-7
+	LDR R0,=0x4802A078				@address for I2C_OA
+	MOV R2,#0x00					@Value to clearing bit
+	STR R2,[R0]					@Store value to the address
+@-------------------------------
+@Setting Count register
+	LDR R0,=0x4802A098				@Address of I2C_CNT
+	MOV R2,#0xD					@Value to write 13 characters
+	STR R2,[R0]					@Store count value into register
+@---------------------------------
+@Setting slave address
+	LDR R0,=0x4802A0AC				@Address of I2C_SA
+	LDR R4,[R0]					@load value to modify
+	MOV R2,#0xC00					@Value to have 
+	AND R4,R4,R2					@Clear bit 9,8,7
+	STR R4,[R0]					@Store value into register to clear bit
+	MOV R2,#0x3C					@write address 0x78 shift left 1 logic 0x0F of slave to the register after clearing
+	STR R2,[R0]					@Store in the register
+@--------------------------------
+@Transmission procedure
+@Clearing XRDY state
+	LDR R0,=0x4802A028				@Address of I2C_IRQSTATUS_RAW
+	LDR R2,=0x7FFF					@if bit 4 XRDY is set ready to send the data
+	STR R2,[R0]					@Write there to disable the IRQSTATUS
+@-------------------------------
+@configuration register 
+@bit 15 I2C_EN module enable, bit 10 MST Master mode, bit 9 TRX Transmitter mode
+	LDR R0,=0x4802A0A4				@address for I2C_CON
+	LDR R2,=0x8600					@Value for bit 9,10,15 
+	STR R2,[R0]					@Store value into register  
+
+@===================================================================================
+@==================================================================================
+@ Make sure Processor CPSR IRQ enable 
+	MRS R3,CPSR					@ Copy CPSR to R3
+	BIC R3,#0x80				@Clear bit 7
+	MSR CPSR_c, R3				@Write back to CPSR	
+
+@wait for interrupts
+LOOP:	NOP
+		B LOOP	
+@==================================================================================
+@==================================================================================
+INT_DIRECTOR:
+@Save the register on the stack
+	STMFD SP!, {R0-R3,LR}		@Push register on the stack
+@First check UART IRQ then check IRQ from button 
+CHECK_INTC_I2C:	
+	LDR R0,=0x482000D8			@INTC_PENDING_IRQ2 for UART2 INTC
+	LDR R2,[R0]					@load value of PENDING_IRQ2
+	TST R2,#0x80				@UART2INT pin 10 INTC INT #71
+	BNE CHECK_I2C				@Go to check IRQ in UART2
+CHECK_INTC_BUTTON:
+	LDR R0,=0x482000F8			@Address of INTC_PENDING_IRQ3 check button
+	LDR R2,[R0]					@Load value to check
+	TST R2,#0x04				@Button pin 2 INTC INT #98
+	BNE CHECK_BUTTON			@Go to check button in GPIO1
+@======================================================================================
+@Checking UART I2C_IRQ_RAW
+CHECK_I2C:
+	LDR R0,=0x4802A024			@Address of I2C_IRQSTATUS_RAW
+	LDR R2,[R0]					@Load value of IIR_UART2
+	@TST R2,#0x1000				@check bit 12 BB . IF Bus is free or busy
+	@BNE PASS_ON				@if 1 BUS is busy go to PASS_ON
+	TST R2,#0x10				@check if bit 4 XRDY . IF XRDY is ready or not
+	BEQ PASS_ON					@Jump to PASS_ON if I2C is not set
+@@@@@@@@@@@@@@@@@@
+	LDR R0,=STAGE				@Load to see if the screen complete the instruction
+	LDRB R1,[R0]				@Load value from address
+	TST R1,#0x1					@Value when the pointer is reach
+	BEQ I2C_SVC_STAGE_1			@Jump to Servicing I2C if pointer
+	B I2C_SVC_STAGE_2			@otherwise jump to Servicing I2C if pointer is not 13
+
+CHECK_BUTTON:
+	LDR R0,=0x4804C02C			@Check GPIO IRQ STATUS
+	LDR R2,[R0]					@Load value from GPIO
+	TST R2,#0x40000000			@Testing if GPIO1_30 IRQ register is 1 or 0
+	BNE BUTTON_SVC				@if z flag is clear Go to button service
+	B PASS_ON					@z flag is set go to PASS_ON
+@===================================================================================
+@Service section remember to turn off interrupt request for register
+BUTTON_SVC:
+NOP
+@turn off IRQ request for GPIO1
+	LDR R1,=0x4804C02C				@GPIO1_IRQSTATUS_0 address
+	MOV R2,#0x40000000				@turn off GPIO1_IRQSTATUS at pin 30 by write a 1
+	STR R2,[R1]						@Writing value to turn IRQ off GPIO1_IRQ_RAW_0
+@@@@@@@@@@@@@@@@@@@@@@@
+	LDR R0,=STAGE				@Load to see if the screen complete the instruction
+	LDRB R1,[R0]				@Load value from address
+	TST R1,#0x1					@Value when the pointer is reach
+	BEQ	BUTTON_STAGE1			@jump to BUTTON_STAGE1
+	B	BUTTON_STAGE2			@jump to BUTTON_STAGE2
+BUTTON_STAGE1:
+	NOP
+@Interrupt enable 
+@XRDY bit 4 for check if the LCD ready to send next char
+	LDR R0,=0x4802A02C				@address for I2C_IQENABLE_SET
+	MOV R2,#0x10					@value to unmask bit 4
+	STR R2,[R0]						@Store value in register
+@START the I2C1 to get acknowledge from I2C1
+	LDR R0,=0x4802A0A4				@Address for I2C_CON
+	LDR R2,=0x8603					@Value to Start
+	STR R2,[R0]						@Store value to register
+	B PASS_ON						@Go to PASS_ON
+
+BUTTON_STAGE2:
+	NOP
+	@@@@@@@@@@@@@ Put a hold on I2C1 I
+@configuration register 
+@bit 15 I2C_EN module enable, bit 10 MST Master mode, bit 9 TRX Transmitter mode
+	LDR R0,=0x4802A0A4				@address for I2C_CON
+	LDR R2,=0x8600					@Value for bit 9,10,15 
+	STR R2,[R0]					@Store value into register
+@Setting Count register
+	LDR R0,=0x4802A098				@Address of I2C_CNT
+	MOV R2,#0xD					@Value to write 10 characters
+	STR R2,[R0]					@Store count value into register
+@START the I2C1 to get acknowledge from I2C1
+	LDR R0,=0x4802A0A4				@Address for I2C_CON
+	LDR R2,=0x8603					@Value to Start
+	STR R2,[R0]						@Store value to register
+	BL RELOAD
+	B PASS_ON						@Go to PASS_ON
+
+@=========================================================================================
+@STAGE 1 sending instruction
+I2C_SVC_STAGE_1:
+	NOP
+@CLEARING XRDY interrupt
+	LDR R0,=0x4802A028				@Address for I2C_IRQSTATUS
+	MOV R2,#0x10					@Value to reset the XRDY
+	STR R2,[R0]						@Write value to clear XRDY
+@STORE instruction
+	LDR R0,=INSTRUCTION_DATA		@Load address instruction
+	LDR R2,=INSTRUCTION_POINTER		@Load Pointer for instruction
+	LDRB R4,[R2]					@Load value pointer
+	LDRB R1,[R0,R4]					@Load current instruction
+	ADD R4,R4,#0x01					@increment instruction offset value
+	STRB R4,[R2]					@Store back pointer for the next use
+	LDR R0,=0x4802A09C				@Address I2C_DATA
+	STRB R1,[R0]					@Write to register
+	
+@BEFORE go back to PASS ON need to see if need to transfer to next stage
+	SUBS R4,R4,#0xD					@Value counter in R4
+	BNE PASS_ON						@Go to PASS_ON if counter is not reach 0xD
+	LDR R0,=STAGE					@Do a change in STAGE
+	MOV R1,#0x1						@value for stage 2
+	STRB R1,[R0]						@Store value stage 2
+@CLEARING XRDY interrupt
+	LDR R0,=0x4802A028				@Address for I2C_IRQSTATUS
+	MOV R2,#0x10					@Value to reset the XRDY
+	STR R2,[R0]						@Write value to clear XRDY
+	B PASS_ON	
+
+@==========================================================================
+@STAGE 2 sending message
+I2C_SVC_STAGE_2:
+	NOP
+@CLEARING XRDY interrupt
+	LDR R0,=0x4802A028				@Address for I2C_IRQSTATUS
+	MOV R2,#0x10					@Value to reset the XRDY
+	STR R2,[R0]						@Write value to clear XRDY
+@Send character
+	LDR R0,=CHAR_PTR			@R0 = address of pointer store
+	LDR R1,=CHAR_COUNT			@R1 = address of count store location
+	LDR R2,[R0]					@R2=Address of desired character in text string
+	LDR R3,[R1]					@R3=current character count value
+	LDRB R4,[R2],#1				@Read char to send from string
+	STR R2,[R0]					@Incremented address store BACK in CHAR_PTR
+	LDR R5,=0x4802A09C			@Address I2C_DATA
+	STRB R4,[R5]				@Send char to Transmit buffer
+	SUBS R3,R3,#1				@Decrement Character count value by 1
+	STR R3,[R1]					@Store value back into CHAR_COUNT
+	BPL PASS_ON					@Greater than or equal zero, more Characters go back
+	BL RELOAD
+	
+	
+@=================================================================================	
+PASS_ON:
+	LDR R0,=0x48200048			@Address if INTC_CONTROL register
+	MOV R1,#0x1					@Value to clear bit 0
+	STR R1,[R0]					@Write to INTC_CONTROL register
+	LDMFD	SP!, {R0-R3,LR}		@restore register
+	SUBS PC,LR,#4				@return from the IRQ
+
+RELOAD:
+	LDR R0,=CHAR_PTR			@R0 = address of pointer store
+	LDR R1,=CHAR_COUNT			@R1 = address of count store location
+	LDR R2,=MESSAGE				@else if done then reload. Get address of starting string
+	STR R2,[R0]					@Write value reload back to address of pointer
+	MOV R2,#13					@Reload original number of char in String again
+	STR R2,[R1]					@Write to address of counter for the next message
+	MOV PC,R14
+
+CHANGE:
+	MOV R4,#0x50
+	MOV PC,R14
+	LDR R5,=0x4802A09C			@Address I2C_DATA
+	STRB R4,[R5]				@Send char to Transmit buffer
+	SUBS R3,R3,#1				@Decrement Character count value by 1
+	STR R3,[R1]					@Store value back into CHAR_COUNT
+	BPL PASS_ON					@Greater than or equal zero, more Characters go back
+	
+.data
+.align 2
+STACK1: .rept 1024
+		.word 0x0000
+		.endr
+STACK2: .rept 1024
+		.word 0x0000
+		.endr	
+.align 4 	
+INSTRUCTION_DATA:
+	.byte	0x00,0x38,0x39,0x14,0x78,0x5E,0x6D,0x0C,0x01,0x06,0x80,0x07,0xF
+INSTRUCTION_POINTER:
+	.byte	0x0
+
+STAGE: .byte 0x0
+SET_CNT: .word 0x0
+
+
+.align 4
+MESSAGE:
+.byte 0x50
+.ascii "Phong Nguyen"
+
+.align 4
+CHAR_PTR: .word MESSAGE			@Pointer to next character
+CHAR_COUNT: .word 13			@counter for character to send
+.end
+  

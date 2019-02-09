@@ -1,0 +1,267 @@
+@Phong Nguyen
+@ECE 372
+@project 1
+@UART Initialization and RC8600 Talker
+@Setting up STACK
+.text
+.global _start
+.global INT_DIRECTOR
+_start:
+	LDR R13,=STACK1 				@Point to base of STACK for SVC mode
+	ADD R13, R13, #0x1000 				@point to top of the STACK
+	CPS #0x12
+	LDR R13,=STACK2					@Point to base of STACK for IRQ mode
+	ADD R13, R13, #0x1000 				@Point to top of the STACK
+	CPS #0x13					@Back to SVC mode
+@===========================================================================
+@===========================================================================
+@Setting up the I2C1
+
+@------------------------------
+@Control module base address L4_WKUP 0x44E10000
+@Setting up MUX for I2C1_SDA
+@mode 2: 0010 . AND bit 3,2,0 to 0 and OR bit 1
+	LDR R0,=0x44E10958				@Address of conf_spi0_d1
+	MOV R2,#0x6A 					@mode 2 disable Pullup/Pulldown, Rx enable, Slow slew
+	STR R2, [R0]					@store back for register spi0_sclk switching 
+@Setting up MUX for I2C1_SCL
+	LDR R0,=0x44E1095C 				@Address of conf_spi0_cs0
+	MOV R2,#0x6A 					@mode 2 disable Pullup/Pulldown, Rx enable, Slow slew
+	STR R2, [R0]					@store back for register spi0_sclk switching 
+@Setting up MUX for I2C1_SCL
+@------------------------------
+@Clock for I2C1 base address CM_PER 0x44E00000
+	LDR R0,=0x44E00048				@Address for CM_PER_I2C1_CLKCTRL
+	MOV R2,#0x2					@Value to start the clock
+	STR R2,[R0]					@Store value to turn the clock on
+@-------------------------------
+@Seting Debug Subsystem I2C_SYSTEST
+	LDR R0,=0x44E000BC				@Address for I2C_SYSTEST
+	LDR R2,[R0]					@Load Value from register
+	AND R2,R2,#0xFFFFBFFF				@Value to clear bit 14 for free debug
+	STR R2,[R0]					@Store back to register
+@-----------------------------------
+@Disable I2C module 
+	LDR R0,=0x44E000A4				@Address for I2C_CON
+	LDR R2,[R0]					@Load value in address
+	LDR R4,=0xFFFF7FFF				@Value to clear bit 15
+	BIC R2,R4					@Clear bit 15
+	STR R2,[R0]					@Store back in register
+@---------------------------------------
+@Reset I2C module
+	LDR R0,=0x44E00010				@Address for I2C_SYSC
+	MOV R2,#0x2					@Value to reset
+	STR R2,[R0]					@Store value in register
+
+@----------------------------------------------
+@Disable AUTOIDLE in I2C_SYSC and do a software reset
+LDR		R0, =0x4802A010				@ Address for I2C_SYSC
+	MOV R2,#0x02
+	STR R2,[R0]					@Store value back to register
+@------------------------------
+@Prescaler value setting up module clock
+@initial value of Prescaler 48 MHZ divine by 4 to get 12 MHZ
+	LDR R0,=0x4802A0B0				@Address of I2C_PSC
+	MOV R2,#0x3					@Setting value divine by 4
+	STR R2,[R0]					@Store value divine by 4
+@------------------------------
+@Setup Low time register SCLL. Base address I2C1: 0x4802A000
+	LDR R0,=0x4802A0B4				@address for I2C_SCLL
+	MOV R2,#0x35					@Value 53 in Dec for SCLL
+	STR R2,[R0]					@Store value 53 into register
+@Setup High time register SCLH. Base address I2C1: 0x4802A000
+	LDR R0,=0x4802A0B8				@address for I2C_SCLH
+	MOV R2,#0x37					@value 55 in Dec for SCLH
+	STR R2,[R0]					@Store value 55 into register
+@--------------------------------
+@Setup Own address I2C_0A.
+@Make sure clearing bit 9-7
+	LDR R0,=0x4802A078				@address for I2C_OA
+	MOV R2,#0x00					@Value to clearing bit
+	STR R2,[R0]					@Store value to the address
+@-------------------------------
+@Setting Count register
+	LDR R0,=0x4802A098				@Address of I2C_CNT
+	MOV R2,#0xA					@Value to write 10 characters
+	STR R2,[R0]					@Store count value into register
+@---------------------------------
+@Setting slave address
+	LDR R0,=0x4802A0AC				@Address of I2C_SA
+	LDR R4,[R0]					@load value to modify
+	MOV R2,#0xC00					@Value to have 
+	AND R4,R4,R2					@Clear bit 9,8,7
+	STR R4,[R0]					@Store value into register to clear bit
+	MOV R2,#0x3C					@write address 0x78 shift left 1 logic 0x0F of slave to the register after clearing
+	STR R2,[R0]					@Store in the register
+@--------------------------------
+@Transmission procedure
+@Clearing XRDY state
+	LDR R0,=0x4802A028				@Address of I2C_IRQSTATUS_RAW
+	LDR R2,=0x7FFF					@if bit 4 XRDY is set ready to send the data
+	STR R2,[R0]					@Write there to disable the IRQSTATUS
+@-------------------------------
+@configuration register 
+@bit 15 I2C_EN module enable, bit 10 MST Master mode, bit 9 TRX Transmitter mode
+	LDR R0,=0x4802A0A4				@address for I2C_CON
+	LDR R2,=0x8600					@Value for bit 9,10,15 
+	STR R2,[R0]					@Store value into register
+
+@=================================================================================
+@=================================================================================
+
+
+	BL POLL_BB					@Check BUS if it is busy
+	BL START					@Start the I2C1
+	MOV R5,#0xA					@ Counter value 10
+	MOV R3, #0x00					@ CLEAR POINTER
+
+SEND_INST:
+
+	BL WAIT						@Delay
+	BL POLL_XRDY					@POLL until XRDY is set
+	BL WAIT						@Delay after POLL
+
+@STORE instruction
+	LDR R0,=INST_DATA
+	LDRB R1,[R0,R3]					@Load current instruction
+	ADD R3,R3,#0x01					@increment instruction offset value
+	LDR R0,=0x4802A09C				@Address I2C_DATA
+	STRB R1,[R0]						@Write to register
+	NOP
+
+	BL WAIT						@Delay
+	BL CLEAR_XRDY					@Clear XRDY for the next write
+	BL WAIT						@Delay
+
+	SUBS R5,R5,#1					@Decrement the counter
+	BNE SEND_INST					@ Send more instructions if counter is not 0
+	BL WAIT
+
+	NOP
+@===========================================================================================
+@INTIALIZE The I2C for second Message
+@configuration register 
+@bit 15 I2C_EN module enable, bit 10 MST Master mode, bit 9 TRX Transmitter mode
+
+	LDR R0,=0x4802A0A4				@address for I2C_CON
+	LDR R2,=0x8600					@Value for bit 9,10,15 
+	STR R2,[R0]					@Store value into register
+@Setting Count register
+	LDR R0,=0x4802A098				@Address of I2C_CNT
+	MOV R2,#0x12					@Value to write 10 characters
+	STR R2,[R0]					@Store count value into register
+@==============================================================================================
+@Send MESSAGE
+@===========================================================================================
+	BL POLL_BB					@Check BUS if it is busy
+	BL START					@Start the I2C1
+	MOV R6,#0x12					@ Counter value 10
+	MOV R3, #0x00					@ CLEAR POINTER
+	BL RELOAD
+
+MESSAGE:
+
+	BL WAIT						@Delay
+	BL POLL_XRDY					@POLL until XRDY is set
+	BL WAIT						@Delay after POLL
+
+@Send character
+	LDR R0,=CHAR_PTR			@R0 = address of pointer store
+	LDR R1,=CHAR_COUNT			@R1 = address of count store location
+	LDR R2,[R0]					@R2=Address of desired character in text string
+	LDR R3,[R1]					@R3=current character count value
+	LDRB R4,[R2],#1				@Read char to send from string
+	STR R2,[R0]					@Incremented address store BACK in CHAR_PTR
+	LDR R5,=0x4802A09C			@Address I2C_DATA
+	STRB R4,[R5]				@Send char to Transmit buffer
+	NOP
+
+	BL WAIT						@Delay
+	BL CLEAR_XRDY					@Clear XRDY for the next write
+	BL WAIT						@Delay
+
+	SUBS R6,R6,#1					@Decrement the counter
+	BNE MESSAGE					@ Send more instructions if counter is not 0
+	BL WAIT
+
+NOP
+
+@===================================================================================
+@=================================================================================
+@Functions sections
+@--------------------------------------------------------------
+@When the BUS is free initialize the transmission
+POLL_BB:
+	LDR R0,=0x4802A024				@Address for I2C_IRQSATUS_RAW
+	LDR R2,[R0]					@Load value in the address
+	TST R2,#0x1000					@Test if the bit is clear or set
+	BNE POLL_BB					@Keep Polling if the Bus is Busy
+	MOV PC,R14					@Return
+@--------------------------------------------------------------
+POLL_XRDY:
+	LDR R0,=0x4802A024				@Address for I2C_IRQSTATUS_RAW
+	LDR R2,[R0]					@Load value in the address
+	TST R2,#0x10					@Test value with bit 4 XRDY
+	BEQ POLL_XRDY					@Keep Polling if the XRDY is not set
+	MOV PC,R14					@Return
+@---------------------------------------------------------------
+START:
+	LDR R0,=0x4802A0A4				@Address for I2C_CON
+	LDR R2,=0x8603					@Value to Start
+	STR R2,[R0]					@Store value to register
+	MOV PC,R14					@Return
+@--------------------------------------------------------------
+STOP:
+	LDR R0,=0x4802A0A4				@Address for I2C_CON
+	LDR R2,=0x8603					@Value to Start
+	STR R2,[R0]					@Store value to register
+	MOV PC,R14					@Return
+@----------------------------------------------------------------
+CLEAR_XRDY:
+	LDR R0,=0x4802A028				@Address for I2C_IRQSTATUS
+	MOV R2,#0x10					@Value to reset the XRDY
+	STR R2,[R0]					@Write value to clear XRDY
+	MOV PC,R14					@Return
+@-------------------------------------------------------------------
+WAIT:
+	LDR R2,=0x00040000				@Wait value 0.2 s
+WAIT_LOOP:	
+	SUBS R2,R2,#1					@Decrement the value
+	BNE WAIT_LOOP					@Return
+	MOV PC,R14
+@------------------------------------------------------------------
+CHECK:
+	LDR R0,=0x4802A024				@Load address I2C_IRQSTATUS_RAW
+	LDR R2,[R0]					@load value in address
+	TST R2,#0x4					@testing bit 2 
+	BEQ CHECK
+	MOV PC,R14
+RELOAD:
+	LDR R0,=CHAR_PTR			@R0 = address of pointer store
+	LDR R1,=CHAR_COUNT			@R1 = address of count store location
+	LDR R2,=MESSAGE_DATA			@else if done then reload. Get address of starting string
+	STR R2,[R0]					@Write value reload back to address of pointer
+	MOV R2,#13					@Reload original number of char in String again
+	STR R2,[R1]					@Write to address of counter for the next message
+	MOV PC,R14
+
+.data 
+.align 4 	
+INST_DATA:
+	.byte	0x00,0x38,0x39,0x14,0x78,0x5E,0x6D,0x0C,0x01,0x06
+.align 4
+.align 4
+MESSAGE_DATA:
+.byte 0x50
+.ascii "Phong Nguyen"
+
+.align 4
+CHAR_PTR: .word MESSAGE_DATA			@Pointer to next character
+CHAR_COUNT: .word 13			@counter for character to send
+STACK1: .rept 1024
+		.word 0x0000
+		.endr
+STACK2: .rept 1024
+		.word 0x0000
+		.endr
+.end
