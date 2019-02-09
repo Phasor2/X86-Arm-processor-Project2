@@ -17,3 +17,10 @@ When setting the I2C_CON register, notice the XRDY is set to 1 indicate the ackn
 	
 Now for the Interrupt part, there are 2 main interrupt signal will be generated from the UART. They are THR interrupts and MODEM status interrupts. Initialized these 2 will be for the part of sending character through RS-232C.
 For part of the project, there is no requirement for FIFO. So we also need to disable FIFO.
+
+# PART 2 SETUP IRQ
+## Interrupt unmasking 
+Unmasking 2 interrupts in INTC register. I2C1INT pin 7 INTC INT #71 and the button GPIO1A is at int number 98. For GPIO1A, the pin calculated was pin 2 at INTC_MIR_CLEAR3 register. For I2C1INT, the pin calculated was pin 7 at INTC_MIR_CLEAR2. Simply write 0x04 to INTC_MIR_CLEAR3 and write 0x400 to INTC_MIR_CLEAR2.
+## Sending bytes to LCD
+There are many IRQ bits in IRQENABLE_SET, we just need to unmask XRDY bit. By writing 0x80 to enable XRDY_IE bit 4. When getting the Interrupt from XRDY the process will send the next byte in the array to I2C_DATA.
+
