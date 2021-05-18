@@ -1,4 +1,4 @@
-# Assembly-langguge-X86-Arm-processor-ECE372--Project2
+# X86-Arm-processor-ECE372--Project2
 Full report ECE372 Project2 2018.docx and code "* .txt"
 # Part1 SETUP I2C
 ## Initialization for I2C
